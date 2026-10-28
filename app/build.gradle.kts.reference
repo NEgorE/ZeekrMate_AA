@@ -1,0 +1,139 @@
+import java.util.Properties
+
+plugins {
+    id("com.android.application")
+}
+
+// Постоянный ключ подписи проекта: параметры в local.properties (zm.keystore.*),
+// чтобы подпись сборок не менялась от машины к машине. Сам keystore в репозиторий не входит.
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+android {
+    namespace = "com.zeekrmate.app"
+    compileSdk = 36
+
+    signingConfigs {
+        getByName("debug") {
+            val ksPath = keystoreProps.getProperty("zm.keystore.path")
+            if (ksPath != null && file(ksPath).exists()) {
+                storeFile = file(ksPath)
+                storePassword = keystoreProps.getProperty("zm.keystore.password")
+                keyAlias = keystoreProps.getProperty("zm.keystore.alias")
+                keyPassword = keystoreProps.getProperty("zm.keystore.password")
+            }
+        }
+    }
+
+    defaultConfig {
+        applicationId = "com.zeekrmate.app"
+        minSdk = 31
+        targetSdk = 36
+        versionCode = 116
+        versionName = "1.2"
+        // Активированная тестовая сборка: приложение считается авторизованным без
+        // прохождения активации (zm.preactivated=true в local.properties).
+        buildConfigField("boolean", "PREAUTHORIZED",
+            keystoreProps.getProperty("zm.preactivated") ?: "false")
+        // Поля BuildConfig, которые использует движок Open Headunit (влит в этот APK).
+        buildConfigField("String", "GIT_SHA", "\"merged\"")
+        buildConfigField("String", "FLAVOR", "\"github\"")
+        buildConfigField("String", "AVAILABLE_LOCALES",
+            "\"ar,cs,de,es,es-rES,fr,hi,hu,in,it,ja,ka,ko,nl,pl,pt-rBR,pt-rPT,ro,ru,th,tr,uk,vi,zh-rCN,zh-rTW\"")
+        ndkVersion = "29.0.14206865"
+        externalNativeBuild {
+            cmake {
+                cppFlags("")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        viewBinding = true
+        aidl = true // shizuku: IShizuku.aidl форка OHU
+        buildConfig = true
+    }
+}
+
+val apkVersionName = android.defaultConfig.versionName
+    ?: error("android.defaultConfig.versionName is required to name the APK")
+base.archivesName.set("ZeekrMate-$apkVersionName")
+
+androidComponents {
+    onVariants { variant ->
+        val assembleName = "assemble${variant.name.replaceFirstChar { it.uppercase() }}"
+        val apkDir = layout.buildDirectory.dir("outputs/apk/${variant.name}")
+        val versionName = variant.outputs.first().versionName
+        tasks.matching { it.name == assembleName }.configureEach {
+            doLast {
+                val name = versionName.orNull
+                    ?: error("versionName is required to name the APK")
+                val dir = apkDir.get().asFile
+                val dest = dir.resolve("ZeekrMate-$name.apk")
+                val source = dir.listFiles()
+                    ?.filter { it.isFile && it.extension.equals("apk", ignoreCase = true) }
+                    ?.firstOrNull { it.name != dest.name }
+                if (source != null && source.canonicalFile != dest.canonicalFile) {
+                    source.copyTo(dest, overwrite = true)
+                }
+            }
+        }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+dependencies {
+    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.android.material:material:1.12.0")
+    // ===== Open Headunit engine (AGPL) =====
+    implementation("com.google.protobuf:protobuf-java:3.25.5")
+    implementation("androidx.activity:activity-ktx:1.8.2")
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
+    implementation("androidx.media:media:1.6.0")
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.startup:startup-runtime:1.1.1")
+    implementation("com.google.android.gms:play-services-nearby:19.3.0")
+    implementation("androidx.lifecycle:lifecycle-extensions:2.2.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.2")
+    implementation("androidx.multidex:multidex:2.0.1")
+    implementation("androidx.navigation:navigation-fragment-ktx:2.3.5")
+    implementation("androidx.navigation:navigation-ui-ktx:2.3.5")
+    implementation("com.linkedin.dexmaker:dexmaker:2.28.3")
+    implementation("com.github.bumptech.glide:glide:4.16.0")
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+    implementation("com.github.topjohnwu.libsu:core:6.0.0")
+    implementation("org.conscrypt:conscrypt-android:2.5.3")
+}

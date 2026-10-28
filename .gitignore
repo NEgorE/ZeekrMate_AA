@@ -1,0 +1,13 @@
+# локальные артефакты
+build/
+.gradle/
+*.iml
+local.properties
+
+# IDE
+.idea/
+*.swp
+
+# ОС
+.DS_Store
+Thumbs.db

@@ -1,0 +1,152 @@
+package com.andrerinas.openheadunit.view
+
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.view.Gravity
+import com.andrerinas.openheadunit.App
+import com.andrerinas.openheadunit.utils.AppLog
+import com.andrerinas.openheadunit.utils.HeadUnitScreenConfig
+import com.andrerinas.openheadunit.utils.Settings
+
+object ProjectionViewScaler {
+
+    // The last geometry each view was fitted for. WeakHashMap: the view dies with the window,
+    // and a fresh open brings a fresh view with an empty record.
+    private val lastFit = java.util.WeakHashMap<View, String>()
+
+    fun updateScale(view: View, videoWidth: Int, videoHeight: Int) {
+        if (videoWidth == 0 || videoHeight == 0 || view.width == 0 || view.height == 0) {
+            return
+        }
+
+        // Minimise and restore re-enter this method with the geometry unchanged; on Zeekr that
+        // re-fit ran under different display metrics than the open did and visibly re-rendered
+        // the picture. A real geometry change — the window expanded to fullscreen, the video
+        // size changed — re-fits here for the new size, which is the redraw the user wants.
+        val fitKey = "${view.width}x${view.height}:${videoWidth}x${videoHeight}"
+        if (lastFit[view] == fitKey) {
+            AppLog.d("[UI_DEBUG] Geometry unchanged ($fitKey); skipping re-fit.")
+            return
+        }
+
+        val settings = App.provide(view.context).settings
+        HeadUnitScreenConfig.init(view.context, view.resources.displayMetrics, settings)
+
+        val usableW = HeadUnitScreenConfig.getUsableWidth()
+        val usableH = HeadUnitScreenConfig.getUsableHeight()
+
+        val mirrorFactor = if (settings.hudMirroring) -1.0f else 1.0f
+
+        if (HeadUnitScreenConfig.forcedScale && view is ProjectionView) {
+            val lp = view.layoutParams
+            var paramsChanged = false
+
+            if (settings.videoFitMode == Settings.VideoFitMode.FILL) {
+                // Stretch to fill the usable area exactly (ignores aspect ratio, no bars, no crop)
+                if (lp.width != usableW || lp.height != usableH) {
+                    lp.width = usableW
+                    lp.height = usableH
+                    paramsChanged = true
+                }
+
+                if (lp is FrameLayout.LayoutParams) {
+                    val targetGravity = Gravity.TOP or Gravity.START
+                    if (lp.gravity != targetGravity) {
+                        lp.gravity = targetGravity
+                        paramsChanged = true
+                    }
+                }
+
+                if (paramsChanged) {
+                    view.layoutParams = lp
+                }
+
+                view.scaleX = 1.0f * mirrorFactor
+                view.scaleY = 1.0f
+                view.translationX = 0f
+                view.translationY = 0f
+
+                AppLog.i("[UI_DEBUG] FORCED FILL: Resized view to match screen exactly: ${usableW}x${usableH}")
+            } else {
+                // CONTAIN: size down to fit within the usable area, centered, letterboxed.
+                // COVER: size up past the usable area, centered, the parent clips the overflow.
+                // Both preserve aspect ratio (no distortion) - only the target size differs.
+                val targetW: Int
+                val targetH: Int
+                if (settings.videoFitMode == Settings.VideoFitMode.COVER) {
+                    targetW = HeadUnitScreenConfig.getCoverWidth()
+                    targetH = HeadUnitScreenConfig.getCoverHeight()
+                } else {
+                    targetW = HeadUnitScreenConfig.getAdjustedWidth()
+                    targetH = HeadUnitScreenConfig.getAdjustedHeight()
+                }
+
+                if (lp.width != targetW || lp.height != targetH) {
+                    lp.width = targetW
+                    lp.height = targetH
+                    paramsChanged = true
+                }
+
+                // Center the view in the usable area
+                if (lp is FrameLayout.LayoutParams) {
+                    if (lp.gravity != Gravity.CENTER) {
+                        lp.gravity = Gravity.CENTER
+                        paramsChanged = true
+                    }
+                }
+
+                if (paramsChanged) {
+                    view.layoutParams = lp
+                }
+
+                view.scaleX = 1.0f * mirrorFactor
+                view.scaleY = 1.0f
+                view.translationX = 0f
+                view.translationY = 0f
+
+                AppLog.i("[UI_DEBUG] FORCED ${settings.videoFitMode}: Resized view to ${targetW}x${targetH} (centered)")
+            }
+        } else {
+            // Modern way / TextureView: Use View scaling properties on a full-screen view
+            val finalScaleX = HeadUnitScreenConfig.getScaleX() * mirrorFactor
+            val finalScaleY = HeadUnitScreenConfig.getScaleY()
+
+            val lp = view.layoutParams
+            var paramsChanged = false
+            
+            if (lp.width != ViewGroup.LayoutParams.MATCH_PARENT || 
+                lp.height != ViewGroup.LayoutParams.MATCH_PARENT) {
+                lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+                lp.height = ViewGroup.LayoutParams.MATCH_PARENT
+                paramsChanged = true
+            }
+            
+            if (lp is FrameLayout.LayoutParams) {
+                if (lp.gravity != Gravity.NO_GRAVITY) {
+                    lp.gravity = Gravity.NO_GRAVITY
+                    paramsChanged = true
+                }
+            }
+            
+            if (paramsChanged) {
+                view.layoutParams = lp
+            }
+
+            // Normal centering for non-forced modes
+            view.translationX = 0f
+            view.translationY = 0f
+
+            if (view is IProjectionView) {
+                view.setVideoScale(finalScaleX, finalScaleY)
+            } else {
+                view.scaleX = finalScaleX
+                view.scaleY = finalScaleY
+            }
+            AppLog.i("[UI_DEBUG] Normal Scale. scaleX: $finalScaleX, scaleY: $finalScaleY")
+        }
+
+        // Recorded after the fit is applied, so a re-entry with the same geometry skips.
+        lastFit[view] = fitKey
+    }
+}
